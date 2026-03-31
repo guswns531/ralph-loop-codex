@@ -145,4 +145,4 @@ Output <promise>DONE</promise> when complete." --completion-promise "DONE" --max
 ## References
 
 - prompt scaffolding: [loop-prompt-template.md](references/loop-prompt-template.md)
-- iteration notes: [iteration-ledger-template.md](references/iteration-ledger-template.md)
+- iteration notes: [iteration-tracker-template.md](references/iteration-tracker-template.md)

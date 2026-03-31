@@ -1,4 +1,4 @@
-# Iteration Ledger Template
+# Iteration Tracker Template
 
 ```text
 Iteration: <n>
