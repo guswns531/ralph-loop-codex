@@ -1,5 +1,7 @@
 # Ralph Loop Codex
 
+English | [한국어](README.ko.md)
+
 Ralph Loop Codex is a hook-backed Codex skill that implements a Ralph-style iterative development loop inside a single Codex session.
 
 Run one command once, keep the task prompt frozen, and let Codex continue iterating on the same goal until the completion condition is genuinely true or a hard stop is reached.
