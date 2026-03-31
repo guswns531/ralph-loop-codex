@@ -1,5 +1,10 @@
 # Ralph Loop Codex
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Status: Experimental](https://img.shields.io/badge/Status-Experimental-orange)](#safety-notes)
+[![Codex Hooks](https://img.shields.io/badge/Codex-Hooks-blue)](https://developers.openai.com/codex/hooks)
+[![README KO](https://img.shields.io/badge/README-%ED%95%9C%EA%B5%AD%EC%96%B4-lightgrey)](README.ko.md)
+
 English | [한국어](README.ko.md)
 
 Ralph Loop Codex is a hook-backed Codex skill that implements a Ralph-style iterative development loop inside a single Codex session.
