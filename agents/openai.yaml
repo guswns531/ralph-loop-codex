@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ralph Loop Codex"
+  short_description: "Run Codex in a hook-backed Ralph loop"
+  default_prompt: "$ralph-loop-codex \"TASK\" --completion-promise \"DONE\" --max-iterations 12"
