@@ -52,29 +52,37 @@ def install_hooks_json(hooks_json_path: Path) -> None:
         data = {}
 
     hooks = data.setdefault("hooks", {})
-    hooks["UserPromptSubmit"] = [
+
+    def upsert_command_hook(event_name: str, command_hook: dict) -> None:
+        event_hooks = hooks.setdefault(event_name, [])
+        command = command_hook["command"]
+
+        for group in event_hooks:
+            group_hooks = group.setdefault("hooks", [])
+            for idx, existing in enumerate(group_hooks):
+                if existing.get("command") == command:
+                    group_hooks[idx] = command_hook
+                    return
+
+        event_hooks.append({"hooks": [command_hook]})
+
+    upsert_command_hook(
+        "UserPromptSubmit",
         {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "python3 ~/.codex/hooks/ralph_loop_user_prompt_submit.py",
-                    "statusMessage": "Preparing Ralph loop",
-                }
-            ]
-        }
-    ]
-    hooks["Stop"] = [
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/ralph_loop_user_prompt_submit.py",
+            "statusMessage": "Preparing Ralph loop",
+        },
+    )
+    upsert_command_hook(
+        "Stop",
         {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "python3 ~/.codex/hooks/ralph_loop_stop.py",
-                    "statusMessage": "Checking Ralph loop",
-                    "timeout": 30,
-                }
-            ]
-        }
-    ]
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/ralph_loop_stop.py",
+            "statusMessage": "Checking Ralph loop",
+            "timeout": 30,
+        },
+    )
 
     hooks_json_path.write_text(json.dumps(data, indent=2) + "\n")
 

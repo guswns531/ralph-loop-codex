@@ -25,6 +25,10 @@ The core mechanism is to keep feeding the same task back to the agent while the 
 
 This project adapts that model to Codex using official Codex hooks.
 
+Codex hooks documentation:
+
+- https://developers.openai.com/codex/hooks
+
 ## Prior Work And Attribution
 
 This project builds on and is inspired by:
@@ -41,6 +45,15 @@ The implementation uses two Codex hooks:
 - `UserPromptSubmit`
 - `Stop`
 
+According to the Codex hooks documentation:
+
+- `UserPromptSubmit` can inspect and modify handling of the user prompt, and can add extra developer context through `hookSpecificOutput.additionalContext`
+- `Stop` receives `last_assistant_message`
+- for `Stop`, returning `{"decision":"block","reason":"..."}` does not reject the turn; it tells Codex to continue and uses `reason` as the next continuation prompt
+- Codex discovers hooks from `~/.codex/hooks.json` and `<repo>/.codex/hooks.json`
+
+This implementation relies directly on those documented hook behaviors rather than trying to emulate Ralph with an external shell loop
+
 High-level flow:
 
 1. You start a loop with `/ralph-loop "TASK" ...` or `$ralph-loop-codex "TASK" ...`
@@ -52,6 +65,19 @@ High-level flow:
 7. The loop ends only when the completion promise matches or `--max-iterations` is reached
 
 The self-reference is not "feeding the assistant's output back into itself." It is "reusing the same task while the files created by previous attempts remain in the workspace."
+
+## Why Hooks Instead Of A Separate Loop Process
+
+Codex hooks let the loop live inside the same interactive session.
+
+That matters because:
+
+- the prompt can stay fixed
+- the current session keeps its local context
+- files and verification output persist naturally
+- continuation is handled by Codex itself instead of by a wrapper shell script spawning fresh processes
+
+In other words, this is intentionally closer to Anthropic's in-session plugin model than to an external `while true` launcher.
 
 ## Files
 
@@ -76,6 +102,8 @@ This script:
 - copies the bundled hook files into `~/.codex/hooks`
 - updates `~/.codex/hooks.json`
 - ensures `codex_hooks = true` is set in `~/.codex/config.toml`
+
+The installer is conservative about `hooks.json`: it adds or refreshes the Ralph-specific `UserPromptSubmit` and `Stop` command hooks while preserving unrelated hooks already present in the file.
 
 To verify installation:
 
@@ -134,6 +162,8 @@ Implement feature X and make all tests pass.
 
 The frontmatter stores loop state. The markdown body stores the frozen task prompt that gets replayed on each incomplete stop.
 
+This is intentionally similar to the Claude Code Ralph plugin's project-local state file design, but adapted to Codex conventions by using `.codex/` instead of `.claude/`.
+
 ## Prompting Guidance
 
 Ralph works best when the task is:
@@ -188,6 +218,15 @@ Recommended:
 - use a real completion promise
 - prefer isolated or disposable repos for experimentation
 - review changes before merging
+
+## Validation
+
+This implementation was validated locally with multi-pass test-driven mini projects, including cases where:
+
+- the first pass left failing tests
+- `Stop` continued the session with the same frozen prompt
+- iteration count increased in the state file
+- the loop ended only after `<promise>DONE</promise>` matched the configured completion promise
 
 ## License
 
