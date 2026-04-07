@@ -9,7 +9,7 @@ English | [한국어](README.ko.md)
 
 Ralph Loop Codex is a hook-backed Codex skill that implements a Ralph-style iterative development loop inside a single Codex session.
 
-Run one command once, keep the task prompt frozen, and let Codex continue iterating on the same goal until the completion condition is genuinely true or a hard stop is reached.
+Create a frozen draft, approve it explicitly, and let Codex continue iterating on the same goal until the completion condition is genuinely true or a hard stop is reached.
 
 ## Status
 
@@ -43,7 +43,7 @@ This project builds on and is inspired by:
 - Anthropic's Claude Code Ralph Wiggum plugin: https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum
 - fstandhartinger/ralph-wiggum: https://github.com/fstandhartinger/ralph-wiggum
 
-The Codex implementation here is a separate adaptation built around Codex hooks, project-local state, and a self-contained installer.
+The Codex implementation here is a separate adaptation built around Codex hooks, session-local state under the current working directory, and a self-contained installer.
 
 ## How It Works
 
@@ -63,13 +63,16 @@ This implementation relies directly on those documented hook behaviors rather th
 
 High-level flow:
 
-1. You start a loop with `/ralph-loop "TASK" ...` or `$ralph-loop-codex "TASK" ...`
-2. `UserPromptSubmit` parses the command and writes `.codex/ralph-loop.local.md`
-3. Codex works on the task normally
-4. When Codex tries to stop, the `Stop` hook checks completion
-5. If the task is not complete, `Stop` returns `decision: "block"` and re-injects the same frozen prompt
-6. The repo state persists between passes, so each iteration can learn from previous work
-7. The loop ends only when the completion promise matches or `--max-iterations` is reached
+1. You create a draft with `/ralph-loop "TASK" ...` or `$ralph-loop-codex "TASK" ...`
+2. `UserPromptSubmit` parses the command and writes `cwd/.codex/ralph-loop/<session_id>.md`
+3. `UserPromptSubmit` also writes `cwd/.codex/ralph-loop/<session_id>.tsv` as the task tracker for the loop
+4. Codex turns the task into a frozen working brief aimed at completing the TSV and asks for explicit user approval
+5. You start the loop with `/ralph-approve`
+6. Codex works on the task normally
+7. When Codex tries to stop, the `Stop` hook checks completion
+8. If the task is not complete, `Stop` returns `decision: "block"` and re-injects the same frozen prompt
+9. The workspace state persists between passes, so each iteration can learn from previous work
+10. The loop ends only when the completion promise matches and the TSV has no unfinished required rows, or when `--max-iterations` is reached
 
 The self-reference is not "feeding the assistant's output back into itself." It is "reusing the same task while the files created by previous attempts remain in the workspace."
 
@@ -126,7 +129,9 @@ python3 scripts/uninstall.py
 
 ## Usage
 
-Start a loop:
+Create a draft:
+
+Some Codex clients reserve `/...` for built-in slash commands, so prefer the `$...` forms in practice.
 
 ```text
 /ralph-loop "Implement feature X and make all tests pass." --completion-promise "DONE" --max-iterations 12
@@ -135,28 +140,41 @@ Start a loop:
 Or:
 
 ```text
+$ralph-loop "Implement feature X and make all tests pass." --completion-promise "DONE" --max-iterations 12
+```
+
+Or:
+
+```text
 $ralph-loop-codex "Implement feature X and make all tests pass." --completion-promise "DONE" --max-iterations 12
+```
+
+Approve the draft and start the loop:
+
+```text
+$ralph-approve
 ```
 
 Cancel a loop:
 
 ```text
-/cancel-ralph
+$cancel-ralph
 ```
 
 ## State File
 
-The loop stores project-local state in:
+The loop stores session-local state under the current working directory:
 
 ```text
-.codex/ralph-loop.local.md
+.codex/ralph-loop/<session_id>.md
+.codex/ralph-loop/<session_id>.tsv
 ```
 
 Example shape:
 
 ```md
 ---
-active: true
+status: active
 iteration: 1
 session_id: ...
 max_iterations: 12
@@ -164,12 +182,13 @@ completion_promise: "DONE"
 started_at: "2026-03-31T06:50:30Z"
 ---
 
+Goal:
 Implement feature X and make all tests pass.
 ```
 
-The frontmatter stores loop state. The markdown body stores the frozen task prompt that gets replayed on each incomplete stop.
+The frontmatter stores loop state. The markdown body stores the frozen task brief that gets replayed on each incomplete stop after approval. The TSV stores the row-based task tracker the loop is expected to complete.
 
-This is intentionally similar to the Claude Code Ralph plugin's project-local state file design, but adapted to Codex conventions by using `.codex/` instead of `.claude/`.
+This is intentionally similar to the Claude Code Ralph plugin's local state file design, but adapted to Codex conventions and scoped to the current working directory instead of a git root.
 
 ## Prompting Guidance
 
@@ -197,6 +216,12 @@ $ralph-loop-codex "Implement feature X following TDD:
 4. if any fail, debug and fix
 5. repeat until all green
 Output <promise>DONE</promise> when complete." --completion-promise "DONE" --max-iterations 12
+```
+
+Then:
+
+```text
+/ralph-approve
 ```
 
 ## Good Fits

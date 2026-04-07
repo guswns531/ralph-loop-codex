@@ -2,14 +2,20 @@
 
 import os
 import re
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-STATE_RELATIVE_PATH = Path(".codex/ralph-loop.local.md")
-ACTIVATION_TOKENS = {"/ralph-loop", "$ralph-loop-codex"}
-CANCEL_TOKENS = {"/cancel-ralph"}
+STATE_DIR_RELATIVE_PATH = Path(".codex/ralph-loop")
+ACTIVATION_TOKENS = {
+    "/ralph-loop",
+    "/ralph-loop-codex",
+    "$ralph-loop",
+    "$ralph-loop-codex",
+    "ralph-loop",
+}
+CANCEL_TOKENS = {"/cancel-ralph", "$cancel-ralph", "cancel-ralph"}
+APPROVE_TOKENS = {"/ralph-approve", "$ralph-approve", "ralph-approve"}
 PROMISE_RE = re.compile(r"<promise>(.*?)</promise>", re.DOTALL)
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.DOTALL)
 
@@ -18,25 +24,26 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def resolve_project_root(cwd: str) -> Path:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        root = result.stdout.strip()
-        if root:
-            return Path(root)
-    except Exception:
-        pass
-    return Path(cwd)
+def state_dir_for_cwd(cwd: str) -> Path:
+    return Path(cwd) / STATE_DIR_RELATIVE_PATH
 
 
-def state_path_for_cwd(cwd: str) -> Path:
-    return resolve_project_root(cwd) / STATE_RELATIVE_PATH
+def state_path_for_session(cwd: str, session_id: str) -> Path:
+    safe_session_id = re.sub(r"[^A-Za-z0-9._-]", "_", session_id or "unknown-session")
+    return state_dir_for_cwd(cwd) / f"{safe_session_id}.md"
+
+
+def tasks_path_for_session(cwd: str, session_id: str) -> Path:
+    safe_session_id = re.sub(r"[^A-Za-z0-9._-]", "_", session_id or "unknown-session")
+    return state_dir_for_cwd(cwd) / f"{safe_session_id}.tsv"
+
+
+def display_state_path(cwd: str, session_id: str) -> Path:
+    return state_path_for_session(cwd, session_id).relative_to(Path(cwd))
+
+
+def display_tasks_path(cwd: str, session_id: str) -> Path:
+    return tasks_path_for_session(cwd, session_id).relative_to(Path(cwd))
 
 
 def quote_yaml_string(value: str) -> str:
@@ -84,6 +91,7 @@ def load_state(path: Path):
 def save_state(
     path: Path,
     *,
+    status: str,
     iteration: int,
     session_id: str,
     max_iterations: int,
@@ -101,7 +109,7 @@ def save_state(
     prompt_text = prompt_text.lstrip("\n").rstrip("\n")
     contents = (
         "---\n"
-        "active: true\n"
+        f"status: {status}\n"
         f"iteration: {iteration}\n"
         f"session_id: {session_id}\n"
         f"max_iterations: {max_iterations}\n"
@@ -128,6 +136,7 @@ def update_iteration(path: Path, next_iteration: int) -> bool:
     completion_promise = None if completion_raw == "null" else unquote_yaml_string(completion_raw)
     save_state(
         path,
+        status=frontmatter.get("status", "active"),
         iteration=next_iteration,
         session_id=frontmatter.get("session_id", ""),
         max_iterations=max_iterations,
@@ -143,6 +152,143 @@ def delete_state(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+def write_tasks_tsv(path: Path, rows) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["id\tstatus\ttype\ttitle\tverify\tnotes"]
+    for row in rows:
+        cells = [
+            str(row.get("id", "")),
+            str(row.get("status", "")),
+            str(row.get("type", "")),
+            str(row.get("title", "")),
+            str(row.get("verify", "")),
+            str(row.get("notes", "")),
+        ]
+        lines.append("\t".join(cell.replace("\t", " ").replace("\n", " ").strip() for cell in cells))
+    path.write_text("\n".join(lines) + "\n")
+
+
+def load_tasks_tsv(path: Path):
+    if not path.exists():
+        return None
+    lines = [line.rstrip("\n") for line in path.read_text().splitlines() if line.strip()]
+    if not lines:
+        return []
+    header = lines[0].split("\t")
+    rows = []
+    for line in lines[1:]:
+        values = line.split("\t")
+        if len(values) < len(header):
+            values.extend([""] * (len(header) - len(values)))
+        rows.append(dict(zip(header, values)))
+    return rows
+
+
+def build_task_rows(task: str):
+    task = task.strip()
+    return [
+        {
+            "id": 1,
+            "status": "todo",
+            "type": "inspect",
+            "title": f"Inspect the current code and constraints for: {task}",
+            "verify": "Relevant files, tests, and constraints are identified.",
+            "notes": "",
+        },
+        {
+            "id": 2,
+            "status": "todo",
+            "type": "plan",
+            "title": f"Refine the implementation plan for: {task}",
+            "verify": "The TSV reflects a concrete sequence of verifiable steps.",
+            "notes": "Split or rewrite rows if the task needs finer-grained work.",
+        },
+        {
+            "id": 3,
+            "status": "todo",
+            "type": "implement",
+            "title": f"Implement the required changes for: {task}",
+            "verify": "Code changes are applied and aligned with the task.",
+            "notes": "",
+        },
+        {
+            "id": 4,
+            "status": "todo",
+            "type": "verify",
+            "title": f"Verify that {task}",
+            "verify": "Run the strongest relevant checks and confirm acceptance criteria.",
+            "notes": "",
+        },
+    ]
+
+
+def build_task_brief(task: str, completion_promise, max_iterations: int) -> str:
+    promise_text = completion_promise or "Define an explicit promise before approval if needed."
+    iteration_text = str(max_iterations) if max_iterations > 0 else "unlimited"
+    task = task.strip()
+    return (
+        "Goal:\n"
+        f"{task}\n\n"
+        "Working rules:\n"
+        "- Freeze this brief once approved.\n"
+        "- Inspect the current workspace before making changes.\n"
+        "- Prefer the smallest verifiable next step.\n"
+        "- Run relevant verification after each meaningful change.\n"
+        "- Stop only when the completion condition is genuinely satisfied.\n\n"
+        "Done condition:\n"
+        f"- Completion promise: {promise_text}\n"
+        f"- Hard stop: {iteration_text} iterations\n"
+    )
+
+
+def build_loop_prompt(task_brief: str, tasks_display_path: Path, completion_promise) -> str:
+    lines = [
+        "Execute the approved Ralph loop brief below.",
+        "",
+        task_brief.strip(),
+        "",
+        "Task tracker rules:",
+        f"- Use `{tasks_display_path}` as the source of truth for loop progress.",
+        "- Before making substantial changes, review the TSV and choose the next unfinished row.",
+        "- Update the TSV as you work. Valid statuses: todo, doing, done, blocked, skipped.",
+        "- Do not claim completion while any required TSV row is not done.",
+        "- If the TSV is too coarse or wrong, refine it in place before continuing.",
+        "- Each completed row should have its verification condition actually satisfied.",
+    ]
+    if completion_promise:
+        lines.extend(
+            [
+                "",
+                "Completion rule:",
+                f"- Once every required TSV row is done and verified, output `<promise>{completion_promise}</promise>`.",
+                "- Do not output the promise early.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Completion rule:",
+                "- Once every required TSV row is done and verified, stop cleanly.",
+                "- Do not stop while unfinished required rows remain.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def summarize_open_tasks(rows) -> str:
+    if rows is None:
+        return "Task TSV is missing."
+    open_rows = [row for row in rows if row.get("status", "").strip().lower() not in {"done", "skipped"}]
+    if not open_rows:
+        return ""
+    parts = []
+    for row in open_rows[:5]:
+        parts.append(f"{row.get('id', '?')}:{row.get('status', 'todo')}:{row.get('title', '').strip()}")
+    suffix = " ..." if len(open_rows) > 5 else ""
+    return "Open TSV rows: " + " | ".join(parts) + suffix
 
 
 def parse_promise_text(message: str) -> str:
@@ -164,5 +310,7 @@ def parse_int(value: str):
 def activation_usage() -> str:
     return (
         "Usage: /ralph-loop \"TASK\" [--max-iterations N] [--completion-promise \"TEXT\"]\n"
-        "Alt:   $ralph-loop-codex \"TASK\" [--max-iterations N] [--completion-promise \"TEXT\"]"
+        "Alt:   $ralph-loop \"TASK\" [--max-iterations N] [--completion-promise \"TEXT\"]\n"
+        "Alt:   ralph-loop \"TASK\" [--max-iterations N] [--completion-promise \"TEXT\"]\n"
+        "Then:  $ralph-approve"
     )

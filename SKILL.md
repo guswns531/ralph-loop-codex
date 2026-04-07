@@ -37,20 +37,31 @@ Before using this skill, verify installation. If the hooks are not installed, te
 
 ## Activation
 
-Start a loop in your current session by sending one of these as the user prompt:
+Create a draft in your current session by sending one of these as the user prompt.
+Prefer `$...` forms because some Codex clients reserve `/...` for built-in slash commands:
 
 ```text
 /ralph-loop "TASK" --completion-promise "DONE" --max-iterations 12
 ```
 
 ```text
+$ralph-loop "TASK" --completion-promise "DONE" --max-iterations 12
+```
+
+```text
 $ralph-loop-codex "TASK" --completion-promise "DONE" --max-iterations 12
+```
+
+Then approve the frozen brief with:
+
+```text
+$ralph-approve
 ```
 
 Cancel with:
 
 ```text
-/cancel-ralph
+$cancel-ralph
 ```
 
 The loop happens inside your current session. The Stop hook blocks normal stopping and feeds the SAME PROMPT back until completion.
@@ -63,7 +74,8 @@ The Ralph idea is not "say something new each round." It is "keep attacking the 
 
 This Codex version uses hooks:
 
-- `UserPromptSubmit` parses the Ralph command and writes `.codex/ralph-loop.local.md`
+- `UserPromptSubmit` parses the Ralph command and writes `.codex/ralph-loop/<session_id>.md`
+- `UserPromptSubmit` also writes `.codex/ralph-loop/<session_id>.tsv` as the loop task tracker
 - `Stop` checks whether the loop is genuinely complete
 - if not complete, `Stop` returns `decision: "block"` and re-injects the same prompt text
 
@@ -76,20 +88,23 @@ This creates the self-referential loop:
 
 ## Default Workflow
 
-1. Freeze the loop prompt.
+1. Draft the loop prompt.
 Turn the user's request into a short working brief with scope, constraints, and a concrete done condition. Use [loop-prompt-template.md](references/loop-prompt-template.md) when the task is underspecified.
 
-2. Define two stop conditions.
+2. Get explicit approval.
+After drafting, show the frozen brief and wait for the user to run `/ralph-approve`.
+
+3. Define two stop conditions.
 Set:
 - a semantic stop: what must be true to call the task done
 - a hard stop: max iterations, time box, or a blocker-report threshold
 
 Do not start deep loop work without a hard stop on open-ended tasks.
 
-3. Establish verification first.
+4. Establish verification first.
 Prefer tests, repro steps, linters, builds, contract checks, or executable fixtures. If no automatic check exists, create the smallest reliable one you can.
 
-4. Iterate in narrow passes.
+5. Iterate in narrow passes.
 For each pass:
 - inspect the current state
 - choose the next smallest change that should reduce the failure surface
@@ -97,8 +112,8 @@ For each pass:
 - run the relevant verification
 - use the result to choose the next pass
 
-5. Claim completion only when true.
-If a completion promise is set, only output `<promise>TEXT</promise>` when that statement is completely and unequivocally true. If the hard stop is reached first, stop cleanly and report blockers rather than faking success.
+6. Claim completion only when true.
+If a completion promise is set, only output `<promise>TEXT</promise>` when that statement is completely and unequivocally true and the TSV tracker has no unfinished required rows. If the hard stop is reached first, stop cleanly and report blockers rather than faking success.
 
 ## Prompt Writing
 
@@ -121,6 +136,12 @@ $ralph-loop-codex "Implement feature X following TDD:
 Output <promise>DONE</promise> when complete." --completion-promise "DONE" --max-iterations 12
 ```
 
+Then:
+
+```text
+/ralph-approve
+```
+
 ## Good Fits
 
 - failing tests or builds with a plausible path to green
@@ -140,7 +161,7 @@ Output <promise>DONE</promise> when complete." --completion-promise "DONE" --max
 
 - `--max-iterations` defaults to unlimited if omitted
 - `--completion-promise` is optional, but strongly recommended
-- use `/cancel-ralph` to cancel an active loop
+- use `/cancel-ralph` to cancel a draft or active loop
 
 ## References
 

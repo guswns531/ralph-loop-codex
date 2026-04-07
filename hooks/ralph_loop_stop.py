@@ -6,9 +6,12 @@ import sys
 from ralph_loop_common import (
     delete_state,
     load_state,
+    load_tasks_tsv,
     parse_int,
     parse_promise_text,
-    state_path_for_cwd,
+    state_path_for_session,
+    summarize_open_tasks,
+    tasks_path_for_session,
     unquote_yaml_string,
     update_iteration,
 )
@@ -16,12 +19,17 @@ from ralph_loop_common import (
 
 def main():
     payload = json.load(sys.stdin)
-    state_path = state_path_for_cwd(payload["cwd"])
+    session_id = payload.get("session_id") or ""
+    state_path = state_path_for_session(payload["cwd"], session_id)
+    tasks_path = tasks_path_for_session(payload["cwd"], session_id)
     state = load_state(state_path)
     if not state:
         return
 
     frontmatter = state["frontmatter"]
+    if frontmatter.get("status") != "active":
+        return
+
     prompt_text = state["prompt_text"].lstrip("\n").rstrip("\n")
 
     state_session = frontmatter.get("session_id", "")
@@ -62,11 +70,28 @@ def main():
     completion_raw = frontmatter.get("completion_promise", "null")
     completion_promise = None if completion_raw == "null" else unquote_yaml_string(completion_raw)
     last_message = payload.get("last_assistant_message") or ""
+    task_rows = load_tasks_tsv(tasks_path)
+    open_tasks_summary = summarize_open_tasks(task_rows)
+
+    if task_rows is None:
+        delete_state(state_path)
+        print(
+            json.dumps(
+                {
+                    "systemMessage": (
+                        "⚠️  Ralph loop: Task TSV is missing. Ralph loop is stopping. "
+                        "Run /ralph-loop again to regenerate session state."
+                    )
+                }
+            )
+        )
+        return
 
     if completion_promise:
         promise_text = parse_promise_text(last_message)
-        if promise_text == completion_promise:
+        if promise_text == completion_promise and not open_tasks_summary:
             delete_state(state_path)
+            tasks_path.unlink(missing_ok=True)
             print(
                 json.dumps(
                     {
@@ -75,9 +100,15 @@ def main():
                 )
             )
             return
+    elif not open_tasks_summary:
+        delete_state(state_path)
+        tasks_path.unlink(missing_ok=True)
+        print(json.dumps({"systemMessage": "✅ Ralph loop: All TSV rows are complete."}))
+        return
 
     if max_iterations > 0 and iteration >= max_iterations:
         delete_state(state_path)
+        tasks_path.unlink(missing_ok=True)
         print(
             json.dumps(
                 {
@@ -90,6 +121,7 @@ def main():
     next_iteration = iteration + 1
     if not prompt_text:
         delete_state(state_path)
+        tasks_path.unlink(missing_ok=True)
         print(
             json.dumps(
                 {
@@ -104,6 +136,7 @@ def main():
 
     if not update_iteration(state_path, next_iteration):
         delete_state(state_path)
+        tasks_path.unlink(missing_ok=True)
         print(
             json.dumps(
                 {
@@ -119,11 +152,11 @@ def main():
             "(ONLY when statement is TRUE - do not lie to exit!)"
         )
     else:
-        stop_rule = f"🔄 Ralph iteration {next_iteration} | No completion promise set - loop runs infinitely"
+        stop_rule = f"🔄 Ralph iteration {next_iteration} | To stop: complete and verify all required TSV rows"
 
     output = {
         "decision": "block",
-        "reason": prompt_text,
+        "reason": prompt_text if not open_tasks_summary else f"{prompt_text}\n\n{open_tasks_summary}",
         "systemMessage": stop_rule,
     }
     print(json.dumps(output))

@@ -58,7 +58,9 @@ python3 scripts/uninstall.py
 
 ## 사용법
 
-루프 시작:
+초안 생성:
+
+일부 Codex 클라이언트에서는 `/...` 형태를 내장 slash command로 처리할 수 있으므로, 실제 사용은 `$...` 형태를 권장합니다.
 
 ```text
 /ralph-loop "Implement feature X and make all tests pass." --completion-promise "DONE" --max-iterations 12
@@ -67,13 +69,25 @@ python3 scripts/uninstall.py
 또는:
 
 ```text
+$ralph-loop "Implement feature X and make all tests pass." --completion-promise "DONE" --max-iterations 12
+```
+
+또는:
+
+```text
 $ralph-loop-codex "Implement feature X and make all tests pass." --completion-promise "DONE" --max-iterations 12
+```
+
+초안 승인 후 루프 시작:
+
+```text
+$ralph-approve
 ```
 
 루프 취소:
 
 ```text
-/cancel-ralph
+$cancel-ralph
 ```
 
 ## 동작 방식
@@ -86,27 +100,30 @@ $ralph-loop-codex "Implement feature X and make all tests pass." --completion-pr
 흐름은 이렇습니다.
 
 1. 사용자가 `/ralph-loop ...` 또는 `$ralph-loop-codex ...`를 보냅니다.
-2. `UserPromptSubmit`가 명령을 파싱하고 `.codex/ralph-loop.local.md` 상태 파일을 만듭니다.
-3. Codex가 작업을 진행합니다.
-4. Codex가 멈추려 할 때 `Stop` hook이 completion 여부를 검사합니다.
-5. 아직 미완료면 `decision: "block"`과 함께 같은 프롬프트를 다시 continuation prompt로 넣습니다.
-6. 완료 promise가 정확히 맞거나 `--max-iterations`에 도달하면 루프가 끝납니다.
+2. `UserPromptSubmit`가 명령을 파싱하고 `cwd/.codex/ralph-loop/<session_id>.md` 초안 상태 파일과 `cwd/.codex/ralph-loop/<session_id>.tsv` 작업 추적 파일을 만듭니다.
+3. assistant가 TSV 기준 완료를 목표로 하는 작업 brief를 구체화하고 사용자 승인 요청을 합니다.
+4. 사용자가 `/ralph-approve`를 보내면 같은 파일이 active 상태로 전환됩니다.
+5. Codex가 작업을 진행합니다.
+6. Codex가 멈추려 할 때 `Stop` hook이 completion 여부를 검사합니다.
+7. 아직 미완료면 `decision: "block"`과 함께 같은 프롬프트를 다시 continuation prompt로 넣습니다.
+8. 완료 promise가 정확히 맞거나 `--max-iterations`에 도달하면 루프가 끝납니다.
 
 핵심은 assistant 출력을 그대로 다시 넣는 것이 아니라, 같은 작업 프롬프트를 유지하면서 이전 반복에서 바뀐 파일과 테스트 결과를 다음 반복의 입력 맥락으로 사용하는 것입니다.
 
 ## 상태 파일
 
-프로젝트 로컬 상태는 아래 파일에 저장됩니다.
+세션 로컬 상태는 현재 `cwd` 아래 파일에 저장됩니다.
 
 ```text
-.codex/ralph-loop.local.md
+.codex/ralph-loop/<session_id>.md
+.codex/ralph-loop/<session_id>.tsv
 ```
 
 예시:
 
 ```md
 ---
-active: true
+status: active
 iteration: 1
 session_id: ...
 max_iterations: 12
@@ -117,7 +134,7 @@ started_at: "2026-03-31T06:50:30Z"
 Implement feature X and make all tests pass.
 ```
 
-frontmatter에는 loop 상태가 들어가고, 본문에는 매 반복마다 다시 주입할 고정 프롬프트가 들어갑니다.
+frontmatter에는 loop 상태가 들어가고, 본문에는 승인 후 매 반복마다 다시 주입할 고정 프롬프트가 들어갑니다. TSV는 반복 중 해야 할 일을 추적하는 기준 파일입니다.
 
 ## 어떤 작업에 좋은가
 
